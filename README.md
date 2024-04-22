@@ -1,7 +1,7 @@
 # Azure Function with Middleware for Simple Authorization
 This repository contains a simple Azure Function application that demonstrates how to implement middleware for basic authorization in Azure Functions.
 
-#O verview
+# Overview
 The application consists of an Azure Function with an HTTP trigger. Middleware is used to perform basic authorization by validating a simple API key passed in the request header. If the API key is valid, the function proceeds with the intended operation; otherwise, it returns a "Forbidden" response.
 
 # Features
