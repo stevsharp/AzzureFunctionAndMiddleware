@@ -26,6 +26,18 @@ namespace AzzureFunctionAndMidlware.Middleware
 
             var requestData = await context.GetHttpRequestDataAsync();
 
+            var headers = requestData.Headers;
+
+            if (requestData.Method == "POST")
+            {
+
+            }
+            
+            if (headers.TryGetValues("HeaderName", out var headerValue))
+            {
+                _logger.LogInformation($"Value of HeaderName header: {headerValue}");
+            }
+
             // Reads the HTTP request body as a string.
             var body = await new StreamReader(requestData.Body).ReadToEndAsync();
 
