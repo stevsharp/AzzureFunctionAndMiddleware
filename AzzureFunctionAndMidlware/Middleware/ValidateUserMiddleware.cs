@@ -7,17 +7,13 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 using System.Net;
+using System.Net.Http;
 using System.Security.Cryptography;
 using System.Text;
 
 
 namespace AzzureFunctionAndMidlware.Middleware
 {
-    public class Login
-    {
-        public string username { get; set; }
-        public string password { get; set; }
-    }
 
     internal class ValidateUserMiddleware : IFunctionsWorkerMiddleware
     {
@@ -26,6 +22,13 @@ namespace AzzureFunctionAndMidlware.Middleware
         public ValidateUserMiddleware(ILogger<ValidateUserMiddleware> logger)
         {
             _logger = logger;
+        }
+
+        private string GetQueryParamValue(string queryParams, string paramName)
+        {
+            var queryStringParams = System.Web.HttpUtility.ParseQueryString(queryParams);
+
+            return queryStringParams[paramName];
         }
 
         public async Task Invoke(FunctionContext context, FunctionExecutionDelegate next)
@@ -40,11 +43,6 @@ namespace AzzureFunctionAndMidlware.Middleware
             var signature = string.Empty;
             var secret = string.Empty;
 
-            if (requestData.Method == "POST")
-            {
-
-            }
-            
             if (headers.TryGetValues("HeaderName", out var headerValue))
             {
                 _logger.LogInformation($"Value of HeaderName header: {headerValue}");
@@ -55,94 +53,83 @@ namespace AzzureFunctionAndMidlware.Middleware
                 signature = arr[1];
             }
 
-            // Reads the HTTP request body as a string.
             var body = await new StreamReader(requestData.Body).ReadToEndAsync();
+            string hashHexBody = string.Empty;
+            var bodyJson = string.Empty;
 
-            var dataObject = JObject.Parse(body);
-
-            var login = JsonConvert.SerializeObject(dataObject, Formatting.Indented);
-
-            byte[] hash;
-            string hashHex = string.Empty;
-
-            using (HMACSHA512 hmac = new HMACSHA512(Encoding.UTF8.GetBytes(secret)))
+            if (body is not null)
             {
-                byte[] jsonData = Encoding.UTF8.GetBytes(login);
-                hash = hmac.ComputeHash(jsonData);
-                hashHex = BitConverter.ToString(hash).Replace("-", "").ToLower();
-            }
+                var dataObject = JObject.Parse(body);
 
-            if (!hashHex.Equals(signature))
-            {
-                var req = await context.GetHttpRequestDataAsync();
+                bodyJson = JsonConvert.SerializeObject(dataObject, Formatting.Indented);
 
-                var res = req!.CreateResponse();
+                byte[] hashBody;
 
-                res.StatusCode = HttpStatusCode.BadRequest;
+                using (HMACSHA512 hmac = new(Encoding.UTF8.GetBytes(secret)))
+                {
+                    byte[] jsonData = Encoding.UTF8.GetBytes(bodyJson);
+                    hashBody = hmac.ComputeHash(jsonData);
+                    hashHexBody = BitConverter.ToString(hashBody).Replace("-", "").ToLower();
+                }
 
-                await res.WriteStringAsync("not valid hash login first");
-
-                context.GetInvocationResult().Value = res;
-
-                return;
-            }
-
-
-            if (dataObject.ContainsKey(username) && dataObject.ContainsKey(password))
-            {
-                var usr = dataObject?[username].ToString().ToUpper();
-                var pwd = dataObject?[password].ToString().ToUpper();
-
-                if (string.IsNullOrWhiteSpace(usr) || string.IsNullOrWhiteSpace( pwd))
+                if (!hashHexBody.Equals(signature) && requestData.Method != "GET")
                 {
                     var req = await context.GetHttpRequestDataAsync();
 
-                    // To set the ResponseData
                     var res = req!.CreateResponse();
 
                     res.StatusCode = HttpStatusCode.BadRequest;
 
-                    await res.WriteStringAsync("Please login first");
+                    await res.WriteStringAsync("not valid hash login first");
+
+                    context.GetInvocationResult().Value = res;
+
+                    return;
+                }
+            }
+
+
+            if (requestData.Method == "GET")
+            {
+                string absolutePath = requestData.Url.AbsolutePath;
+
+                if (string.IsNullOrWhiteSpace(bodyJson))
+                {
+                    absolutePath += bodyJson;
+                }
+
+
+                var json = JsonConvert.SerializeObject(absolutePath, Formatting.Indented);
+
+                byte[] hash;
+                string hashHex = string.Empty;
+
+                using (HMACSHA512 hmac = new(Encoding.UTF8.GetBytes(secret)))
+                {
+                    byte[] jsonData = Encoding.UTF8.GetBytes(json);
+                    hash = hmac.ComputeHash(jsonData);
+                    hashHex = BitConverter.ToString(hash).Replace("-", "").ToLower();
+                }
+
+                if (!hashHex.Equals(signature))
+                {
+                    var req = await context.GetHttpRequestDataAsync();
+
+                    var res = req!.CreateResponse();
+
+                    res.StatusCode = HttpStatusCode.BadRequest;
+
+                    await res.WriteStringAsync("not valid hash login first");
 
                     context.GetInvocationResult().Value = res;
 
                     return;
                 }
 
-
-                if (usr != "ADMIN" && pwd != "PASS")
-                {
-                    var req = await context.GetHttpRequestDataAsync();
-
-                    // To set the ResponseData
-                    var res = req!.CreateResponse();
-                    
-                    res.StatusCode = HttpStatusCode.BadRequest;
-
-                    await res.WriteStringAsync("Please login first");
-                    
-                    context.GetInvocationResult().Value = res;
-
-                    return;
-                }
-
-            }
-            else
-            {
-                var req = await context.GetHttpRequestDataAsync();
-
-                // To set the ResponseData
-                var res = req!.CreateResponse();
-
-                res.StatusCode = HttpStatusCode.BadRequest;
-
-                await res.WriteStringAsync("Please login first");
-
-                context.GetInvocationResult().Value = res;
-
-                return;
             }
 
+       
+            //}
             requestData.Body.Position = 0;
 
             _logger.LogInformation("Update context");
@@ -153,3 +140,59 @@ namespace AzzureFunctionAndMidlware.Middleware
         }
     }
 }
+
+
+//if (dataObject.ContainsKey(username) && dataObject.ContainsKey(password))
+//{
+//    var usr = dataObject?[username].ToString().ToUpper();
+//    var pwd = dataObject?[password].ToString().ToUpper();
+
+//    if (string.IsNullOrWhiteSpace(usr) || string.IsNullOrWhiteSpace(pwd))
+//    {
+//        var req = await context.GetHttpRequestDataAsync();
+
+//        // To set the ResponseData
+//        var res = req!.CreateResponse();
+
+//        res.StatusCode = HttpStatusCode.BadRequest;
+
+//        await res.WriteStringAsync("Please login first");
+
+//        context.GetInvocationResult().Value = res;
+
+//        return;
+//    }
+
+
+//    if (usr != "ADMIN" && pwd != "PASS")
+//    {
+//        var req = await context.GetHttpRequestDataAsync();
+
+//        // To set the ResponseData
+//        var res = req!.CreateResponse();
+
+//        res.StatusCode = HttpStatusCode.BadRequest;
+
+//        await res.WriteStringAsync("Please login first");
+
+//        context.GetInvocationResult().Value = res;
+
+//        return;
+//    }
+
+//}
+//else
+//{
+//    var req = await context.GetHttpRequestDataAsync();
+
+//    // To set the ResponseData
+//    var res = req!.CreateResponse();
+
+//    res.StatusCode = HttpStatusCode.BadRequest;
+
+//    await res.WriteStringAsync("Please login first");
+
+//    context.GetInvocationResult().Value = res;
+
+//    return;
+//}
