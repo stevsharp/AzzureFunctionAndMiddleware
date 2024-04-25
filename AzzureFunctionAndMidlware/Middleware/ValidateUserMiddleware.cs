@@ -3,13 +3,22 @@ using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Azure.Functions.Worker.Middleware;
 using Microsoft.Extensions.Logging;
 
+using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 using System.Net;
+using System.Security.Cryptography;
+using System.Text;
 
 
 namespace AzzureFunctionAndMidlware.Middleware
 {
+    public class Login
+    {
+        public string username { get; set; }
+        public string password { get; set; }
+    }
+
     internal class ValidateUserMiddleware : IFunctionsWorkerMiddleware
     {
         private readonly ILogger<ValidateUserMiddleware> _logger;
@@ -28,6 +37,9 @@ namespace AzzureFunctionAndMidlware.Middleware
 
             var headers = requestData.Headers;
 
+            var signature = string.Empty;
+            var secret = string.Empty;
+
             if (requestData.Method == "POST")
             {
 
@@ -36,12 +48,44 @@ namespace AzzureFunctionAndMidlware.Middleware
             if (headers.TryGetValues("HeaderName", out var headerValue))
             {
                 _logger.LogInformation($"Value of HeaderName header: {headerValue}");
+
+                var arr = headerValue?.FirstOrDefault()?.ToString()?.Split(" ");
+
+                secret = arr[0];
+                signature = arr[1];
             }
 
             // Reads the HTTP request body as a string.
             var body = await new StreamReader(requestData.Body).ReadToEndAsync();
 
             var dataObject = JObject.Parse(body);
+
+            var login = JsonConvert.SerializeObject(dataObject, Formatting.Indented);
+
+            byte[] hash;
+            string hashHex = string.Empty;
+
+            using (HMACSHA512 hmac = new HMACSHA512(Encoding.UTF8.GetBytes(secret)))
+            {
+                byte[] jsonData = Encoding.UTF8.GetBytes(login);
+                hash = hmac.ComputeHash(jsonData);
+                hashHex = BitConverter.ToString(hash).Replace("-", "").ToLower();
+            }
+
+            if (!hashHex.Equals(signature))
+            {
+                var req = await context.GetHttpRequestDataAsync();
+
+                var res = req!.CreateResponse();
+
+                res.StatusCode = HttpStatusCode.BadRequest;
+
+                await res.WriteStringAsync("not valid hash login first");
+
+                context.GetInvocationResult().Value = res;
+
+                return;
+            }
 
 
             if (dataObject.ContainsKey(username) && dataObject.ContainsKey(password))
